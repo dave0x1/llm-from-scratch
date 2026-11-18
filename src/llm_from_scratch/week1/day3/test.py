@@ -1,4 +1,4 @@
-from my_grad import Value, draw_dot
+from llm_from_scratch.micrograd.engine import Value, draw_dot
 
 a = Value(0.7, label='a')
 b = Value(-0.1, label='b')
