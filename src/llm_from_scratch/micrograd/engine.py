@@ -3,7 +3,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from graphviz import Digraph
 
-
 class Value:
     def __init__(self, value, _children=(), _op='', label=''):
         self.value = value
@@ -14,80 +13,116 @@ class Value:
         self._backward = lambda: None
 
     def __repr__(self) -> str:
-        return f'Value: {self.value}'
-    
+        return f'Value(value={self.value}, grad={self.grad})'
+
     def __add__(self, other):
         other = other if isinstance(other, Value) else Value(other)
-        out = Value(self.value + other.value, _children=(self, other) ,_op='+')
-        def backward():
+        out = Value(self.value + other.value, (self, other), '+')
+
+        def _backward():
             self.grad += out.grad
             other.grad += out.grad
-        out._backward = backward
+        out._backward = _backward
         return out
+
+    def __radd__(self, other):
+        return self + other
 
     def __mul__(self, other):
         other = other if isinstance(other, Value) else Value(other)
-        out = Value(self.value * other.value, _children=(self, other), _op='*')
-        def backward():
+        out = Value(self.value * other.value, (self, other), '*')
+
+        def _backward():
             self.grad += other.value * out.grad
             other.grad += self.value * out.grad
-        out._backward = backward
+        out._backward = _backward
         return out
-    
+
     def __rmul__(self, other):
         return self * other
 
-    def exp(self):
-        x = self.value
-        t = math.exp(x)
-        out = Value(t, _children=(self,), _op='exp')
-        def backward():
-            self.grad += out.value * out.grad
-        out._backward = backward
-        return out
-
     def __pow__(self, other):
-        assert isinstance(other, (int, float))
-        x = self.value
-        t = x**other
-        out = Value(t, _children=(self,), _op=f'**{other}')
-        def backward():
-            self.grad += (other * x**(other - 1)) * out.grad
-        out._backward = backward
-        return out
+        assert isinstance(other, (int, float)), "only int/float powers"
+        out = Value(self.value ** other, (self,), f'**{other}')
 
-    def __truediv__(self, other):
-        return self * other**-1
+        def _backward():
+            self.grad += other * self.value ** (other - 1) * out.grad
+        out._backward = _backward
+        return out
 
     def __neg__(self):
         return self * -1
 
     def __sub__(self, other):
         return self + (-other)
-    
+
+    def __rsub__(self, other):          # other - self
+        return (-self) + other
+
+    def __truediv__(self, other):       # self / other
+        return self * other ** -1
+
+    def __rtruediv__(self, other):      # other / self
+        return other * self ** -1
+
+    def exp(self):
+        out = Value(math.exp(self.value), (self,), 'exp')
+
+        def _backward():
+            self.grad += out.value * out.grad
+        out._backward = _backward
+        return out
+
+    def tanh(self):
+        out = Value(math.tanh(self.value), (self,), 'tanh')
+
+        def _backward():
+            self.grad += (1 - out.value ** 2) * out.grad
+        out._backward = _backward
+        return out
+
     def sigmoid(self):
         x = self.value
-        t = 1 / (1 + math.exp(-x))
-        out = Value(t, _children=(self,), _op='sigmoid')
-        def backward():
-            self.grad += t * (1 - t) * out.grad
-        out._backward = backward
+        if x >= 0:
+            t = 1 / (1 + math.exp(-x))
+        else:
+            e = math.exp(x)
+            t = e / (1 + e)
+        out = Value(t, (self,), 'sigmoid')
+
+        def _backward():
+            self.grad += out.value * (1 - out.value) * out.grad
+        out._backward = _backward
         return out
-    
+
+    def relu(self):
+        out = Value(max(0.0, self.value), (self,), 'relu')
+
+        def _backward():
+            self.grad += (out.value > 0) * out.grad
+        out._backward = _backward
+        return out
+
     def backward(self):
-        topo = []
-        visited = set()
-        def build_topo(v):
-            if v not in visited:
-                visited.add(v)
-                for child in v._prev:
-                    build_topo(child)
-                topo.append(v)
-        build_topo(self)
+        # iterative post-order DFS: no recursion limit
+        topo, visited = [], set()
+        stack = [(self, False)]
+        while stack:
+            node, children_done = stack.pop()
+            if children_done:
+                topo.append(node)
+                continue
+            if node in visited:
+                continue
+            visited.add(node)
+            stack.append((node, True))      # revisit after children
+            for child in node._prev:
+                if child not in visited:
+                    stack.append((child, False))
+
         self.grad = 1.0
         for node in reversed(topo):
             node._backward()
-
 
 def trace(root):
     nodes, edges = set(), set()
